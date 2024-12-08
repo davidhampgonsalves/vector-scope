@@ -1,0 +1,145 @@
+<html>
+  <head>
+    <style>
+      #drop {
+        max-width: 100%;
+        min-height: 100%;
+        background: lightcoral;
+        margin: 1em;
+        padding: 2em;
+      }
+
+      #drop p {
+        padding-bottom: 2em;
+        text-align:center;
+      }
+
+      #target {
+        display: none;
+      }
+
+      #out {
+        word-break: break-all;
+        margin: 2em;
+      }
+    </style>
+  </head>
+<body>
+  <div id="drop" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);">
+    <p>✏️ Drop in SVG's, which should have a w/h of 256.</p>
+    <div id="target"></div>
+    <div id="out"></div>
+  </div>
+  <script>
+    function save(str) {
+      var link = document.createElement('a');
+      link.download = 'data.h';
+      var blob = new Blob([str], {type: 'text/plain'});
+      link.href = window.URL.createObjectURL(blob);
+      link.click();
+    }
+
+    function pathToPoints(path) {
+      const len = path.getTotalLength()
+      let points = [];
+
+      for(let i=0 ; i < len ; i += 1) {
+        const pt = path.getPointAtLength(i);
+        points.push(Math.round(Math.abs(pt.x)));
+        points.push(Math.round(Math.abs(pt.y)));
+      }
+      return points;
+    }
+
+    function dropHandler(ev) {
+      ev.preventDefault();
+
+      output = ("const unsigned short frames[][2] = {");
+      const readFiles = [...ev.dataTransfer.items].map(item =>readFile(item.getAsFile()));
+
+      Promise.all(readFiles).then(files => {
+        let frames;
+        if(files.length > 1)
+          frames = framesFromFiles(files);    
+        else
+          frames = framesFromLayers(files[0])
+
+        const frameData = generateFrameData(frames);
+        save(frameData);
+      })
+    }
+
+    function framesFromFiles(files) {
+      const frames = [];
+      files.forEach((svgString, i) => {
+        document.querySelector("#target").innerHTML = svgString;
+        document.querySelectorAll("path").forEach((path) => {
+          const points = pathToPoints(path);
+          if(!frames[i]) 
+            frames[i] = []; 
+          else {
+            // paths points groups are seperated by [500, 500]
+            frames[i].push(500);
+            frames[i].push(500);
+          }
+          frames[i] = frames[i].concat(points);
+        })
+      })
+      return frames;
+    }
+
+    function framesFromLayers(svgString) {
+      const frames = [];
+      document.querySelector("#target").innerHTML = svgString;
+      const layers = Array.prototype.slice.call(document.querySelectorAll("g")).reverse();
+      layers.forEach((layer, i) => {
+        layer.querySelectorAll("path").forEach((path) => {
+          const points = pathToPoints(path);
+          if(!frames[i]) 
+            frames[i] = []; 
+          else {
+            // paths points groups are seperated by [500, 500]
+            frames[i].push(500);
+            frames[i].push(500);
+          }
+          frames[i] = frames[i].concat(points);
+        })
+      });
+
+      return frames;
+    }
+
+    function generateFrameData(frames) {
+      const uuid = crypto.randomUUID().split("-")[0];
+      let frameNames = [];
+      let framePoints = []
+      frames.forEach((points, i) => {
+        frameNames.push(`${uuid}_framePoints${i}`);
+        framePoints.push(points);
+      });
+
+      let out = `const unsigned int ${uuid}_frameCount = ${frames.length}; 
+const unsigned int ${uuid}_framePointCounts[] = { ${framePoints.map(p => p.length)} };
+`;
+
+      frames.forEach((frame, i) => {
+        out += `const unsigned short ${frameNames[i]}[] = { ${frame} };\n`
+      })
+      out += `const unsigned short* ${uuid}_frames[] = { ${frameNames} };`;
+
+      return out;
+    }
+
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        var fr = new FileReader();
+        fr.onload = () => {
+          resolve(fr.result);
+        };
+        fr.readAsText(file);
+      });
+    }
+    function dragOverHandler(ev) { ev.preventDefault(); }
+  </script>
+</body>
+</html>
