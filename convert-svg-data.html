@@ -26,46 +26,74 @@
   </head>
 <body>
   <div id="drop" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);">
-    <p>✏️ Drop in SVG's, which should have a w/h of 256.</p>
+    <p>✏️ Drop in SVG's, which should have a w/h of 254.</p>
     <div id="target"></div>
     <div id="out"></div>
   </div>
   <script>
-    function save(str) {
+    const MAX_CORD = 254;
+    const NEW_PATH_CORD = 255;
+    function save(fileName, str) {
       var link = document.createElement('a');
-      link.download = 'data.h';
+      link.download = `${fileName}.h`;
       var blob = new Blob([str], {type: 'text/plain'});
       link.href = window.URL.createObjectURL(blob);
       link.click();
     }
-
+    
+    const OFFSET_INTEVAL = 10;
     function pathToPoints(path) {
       const len = path.getTotalLength()
+      let offset = (len / 6) < OFFSET_INTEVAL ? Math.floor(len/6) : 10; // offset should always allow for at least 6 points per line
+      if(offset < 1) offset = 1;
       let points = [];
+      // let offset = 1;
 
-      for(let i=0 ; i < len ; i += 1) {
+      for(let i=0 ; i < len ; i += offset) {
         const pt = path.getPointAtLength(i);
-        points.push(Math.round(Math.abs(pt.x)));
-        points.push(Math.round(Math.abs(pt.y)));
+        let x = Math.floor(pt.x), y = Math.floor(pt.y);
+        if(x > MAX_CORD) x = MAX_CORD;
+        if(y > MAX_CORD) y = MAX_CORD; // TODO: why are these happening?
+        points.push(x);
+        points.push(y);
+    
+        if(i + offset > len) { // make sure we get the last point
+          offset = len - i; 
+        }
+
+        // offsets should ramp up and down so that we get more points at line starts/ends
+        // if(i < OFFSET_INTEVAL) {
+        //   offset *= 2;
+        //   if(offset > OFFSET_INTEVAL) offset = OFFSET_INTEVAL;
+        // } else if(i >= len - OFFSET_INTEVAL) {
+        //   // if we are in the last offset then ramp down offset
+        //   offset = Math.ceil(offset / 2);
+        // } else if(i >= len - (OFFSET_INTEVAL * 2)) {
+        //   // if we have less then 2 offsets left then make sure the last offset is a full offset interval
+        //   offset = len - i - OFFSET_INTEVAL;
+        // } 
       }
+
       return points;
     }
 
     function dropHandler(ev) {
       ev.preventDefault();
 
-      output = ("const unsigned short frames[][2] = {");
       const readFiles = [...ev.dataTransfer.items].map(item =>readFile(item.getAsFile()));
 
-      Promise.all(readFiles).then(files => {
+      Promise.all(readFiles).then(results => {
+        let files = results.map((result) => result.contents);
+        const fileName = results[0].name.split(".")[0];
+
         let frames;
         if(files.length > 1)
           frames = framesFromFiles(files);    
         else
           frames = framesFromLayers(files[0])
 
-        const frameData = generateFrameData(frames);
-        save(frameData);
+        const frameData = generateFrameData(fileName, frames);
+        save(fileName, frameData);
       })
     }
 
@@ -78,9 +106,8 @@
           if(!frames[i]) 
             frames[i] = []; 
           else {
-            // paths points groups are seperated by [500, 500]
-            frames[i].push(500);
-            frames[i].push(500);
+            frames[i].push(NEW_PATH_CORD);
+            frames[i].push(NEW_PATH_CORD);
           }
           frames[i] = frames[i].concat(points);
         })
@@ -89,18 +116,17 @@
     }
 
     function framesFromLayers(svgString) {
-      const frames = [];
       document.querySelector("#target").innerHTML = svgString;
       const layers = Array.prototype.slice.call(document.querySelectorAll("g")).reverse();
+      const frames = [];
       layers.forEach((layer, i) => {
         layer.querySelectorAll("path").forEach((path) => {
           const points = pathToPoints(path);
           if(!frames[i]) 
             frames[i] = []; 
           else {
-            // paths points groups are seperated by [500, 500]
-            frames[i].push(500);
-            frames[i].push(500);
+            frames[i].push(NEW_PATH_CORD);
+            frames[i].push(NEW_PATH_CORD);
           }
           frames[i] = frames[i].concat(points);
         })
@@ -109,23 +135,20 @@
       return frames;
     }
 
-    function generateFrameData(frames) {
-      const uuid = crypto.randomUUID().split("-")[0];
+    function generateFrameData(fileName, frames) {
       let frameNames = [];
       let framePoints = []
       frames.forEach((points, i) => {
-        frameNames.push(`${uuid}_framePoints${i}`);
+        frameNames.push(`${fileName}_framePoints${i}`);
         framePoints.push(points);
       });
 
-      let out = `const unsigned int ${uuid}_frameCount = ${frames.length}; 
-const unsigned int ${uuid}_framePointCounts[] = { ${framePoints.map(p => p.length)} };
-`;
+      let out = `int ${fileName}_frameCount = ${frames.length};\nint ${fileName}_framePointCounts[] = { ${framePoints.map(p => p.length)} };\n`;
 
       frames.forEach((frame, i) => {
-        out += `const unsigned short ${frameNames[i]}[] = { ${frame} };\n`
+        out += `uint8_t ${frameNames[i]}[] = { ${frame} };\n`
       })
-      out += `const unsigned short* ${uuid}_frames[] = { ${frameNames} };`;
+      out += `uint8_t* ${fileName}_frames[] = { ${frameNames} };`;
 
       return out;
     }
@@ -134,7 +157,7 @@ const unsigned int ${uuid}_framePointCounts[] = { ${framePoints.map(p => p.lengt
       return new Promise((resolve, reject) => {
         var fr = new FileReader();
         fr.onload = () => {
-          resolve(fr.result);
+          resolve({ name: file.name, contents: fr.result });
         };
         fr.readAsText(file);
       });
