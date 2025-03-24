@@ -1,0 +1,172 @@
+<html>
+  <head>
+    <style>
+      #drop {
+        max-width: 100%;
+        min-height: 100%;
+        background: lightcoral;
+        margin: 1em;
+        padding: 2em;
+      }
+
+      #drop p {
+        padding-bottom: 2em;
+        text-align:center;
+      }
+
+      #target {
+        display: none;
+      }
+
+      #out {
+        word-break: break-all;
+        margin: 2em;
+      }
+    </style>
+        <script type="text/javascript" src="jsgif/LZWEncoder.js"></script>
+        <script type="text/javascript" src="jsgif/NeuQuant.js"></script>
+        <script type="text/javascript" src="jsgif/GIFEncoder.js"></script>
+        <script type="text/javascript" src="jsgif/b64.js"></script>
+  </head>
+<body>
+  <div id="drop" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);">
+    <p>✏️ Drop in SVG's, which should have a w/h of 254.</p>
+    <div id="target"></div>
+    <div id="out"></div>
+    <canvas id=canvas width="500" height="500" style="display: none"></canvas>
+  </div>
+  <script>
+    const MAX_CORD = 254;
+    const NEW_PATH_CORD = 255;
+    function save(fileName, str) {
+      var link = document.createElement('a');
+      link.download = `${fileName}.h`;
+      var blob = new Blob([str], {type: 'text/plain'});
+      link.href = window.URL.createObjectURL(blob);
+      link.click();
+    }
+    
+    const OFFSET_INTEVAL = 10;
+    function pathToPoints(path) {
+      const len = path.getTotalLength()
+      let offset = (len / 6) < OFFSET_INTEVAL ? Math.floor(len/6) : 10; // offset should always allow for at least 6 points per line
+      if(offset < 1) offset = 1;
+      let points = [];
+
+      for(let i=0 ; i < len ; i += offset) {
+        const pt = path.getPointAtLength(i);
+        let x = Math.floor(pt.x), y = Math.floor(pt.y);
+
+        if(x < 0) x = 0;
+        if(y < 0) y = 0; 
+        if(x > MAX_CORD || y > MAX_CORD) continue; // not sure why I get values above 250 sometimes
+        points.push(x);
+        points.push(y);
+    
+        if(i + offset > len) { // make sure we get the last point
+          offset = len - i; 
+        }
+      }
+
+      return points;
+    }
+
+    function dropHandler(ev) {
+      ev.preventDefault();
+
+      const readFiles = [...ev.dataTransfer.items].map(item =>readFile(item.getAsFile()));
+
+      Promise.all(readFiles).then(results => {
+        let files = results.map((result) => result.contents);
+        const fileName = results[0].name.split(".")[0];
+
+        let frames;
+        if(files.length > 1)
+          frames = framesFromFiles(files, fileName);    
+        else {
+          document.querySelector("#target").innerHTML = files[0];
+          frames = framesFromLayers();
+        }
+        drawFrames(frames);
+      })
+    }
+
+    function framesFromFiles(files) {
+      return files.map((svgString) => {
+        document.querySelector("#target").innerHTML = svgString;
+        return document.querySelectorAll("#target path");
+      })
+    }
+
+    function framesFromLayers() {
+      // grab all top level layers, each one should represent a single animation frame
+      const layers = Array.prototype.slice.call(document.querySelectorAll("svg > g")).reverse();
+      return layers.map((layer) => {
+        return layer.querySelectorAll("path")      
+      });
+    }
+
+    const FPS = {
+      vector_scope: 12,
+      owl: 12,
+      cube: 20,
+      scissors: 8,
+      kirby: 20,
+      frog: 22,
+      mushroom_pat: 12,
+      sheep: 14,
+      water_wheel: 24,
+      pingu: 14,
+    }
+    function drawFrames(frames) {
+      const canvas = document.getElementsByTagName("canvas")[0];
+      const ctx = canvas.getContext("2d");
+      ctx.scale(1.8, 1.8);
+
+      var encoder = new GIFEncoder();
+      encoder.setRepeat(0);
+      const fps = 14;
+      encoder.setDelay(1000 / fps);
+      encoder.start();
+      encoder.setTransparent("#ffffff")
+      frames.forEach((paths, i) => {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        paths.forEach(pathEl => {
+          const path = new Path2D(pathEl.getAttribute("d"));
+
+          ctx.lineWidth = 6;
+          ctx.strokeStyle = "#00ff00ff";
+          ctx.stroke(path);
+
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#b4ffd0ff';
+          ctx.stroke(path);
+        })
+        encoder.addFrame(ctx);
+        console.log("finished frame ", i)
+      })
+      encoder.finish();
+      var binary_gif = encoder.stream().getData() //notice this is different from the as3gif package!
+      var data_url = 'data:image/gif;base64,'+encode64(binary_gif);
+      const img = document.createElement('img');
+      img.src = data_url;
+      img.width = 500;
+      img.height = 500;
+      document.querySelector("#out").appendChild(img);
+    }
+
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        var fr = new FileReader();
+        fr.onload = () => {
+          resolve({ name: file.name, contents: fr.result });
+        };
+        fr.readAsText(file);
+      });
+    }
+    function dragOverHandler(ev) { ev.preventDefault(); }
+  </script>
+</body>
+</html>
